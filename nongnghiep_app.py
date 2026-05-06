@@ -5,7 +5,7 @@ import plotly.express as px
 # 1. Cấu hình trang
 st.set_page_config(page_title="Hệ thống Dashboard Nông nghiệp", layout="wide")
 
-st.title("📊 Công cụ Phân tích Dữ liệu Nông nghiệp (Bản sửa lỗi)")
+st.title("📊 Công cụ Phân tích Dữ liệu Nông nghiệp ")
 
 # 2. Hàm xử lý dữ liệu thông minh - ĐÃ SỬA LỖI VALUEERROR
 def process_data(file):

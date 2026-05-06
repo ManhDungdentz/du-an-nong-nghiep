@@ -54,7 +54,7 @@ if uploaded_files:
                 if not val.empty:
                     cols[i % 4].metric(label=m, value=f"{val.iloc[-1]:.2f}")
 
-            # --- VẼ BIỂU ĐỒ ĐƯỜNG (FIX CỘT) ---
+            # --- VẼ BIỂU ĐỒ ĐƯỜNG (FIX CỘT) --
             st.markdown("---")
             draw_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT']]
             selected_metrics = st.multiselect("Chọn thông số:", draw_cols, default=metrics_avail[:2])

@@ -3,23 +3,22 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Hệ Thống Phân Tích Dữ Liệu", layout="wide")
-st.title("📊 Hệ Thống Phân Tích Dữ Liệu ")
+st.set_page_config(page_title="cộng cụ phân tích dữ liệu", layout="wide")
+st.title("cộng cụ phân tích dữ liệu")
 
 def process_data(file):
     df = pd.read_json(file)
     if 'Thời gian' in df.columns:
-        # Chuẩn hóa thời gian từ định dạng file
         df['Thời gian'] = pd.to_datetime(df['Thời gian'].astype(str).str.replace('-', ' ', n=2).str.replace('-', ':'), errors='coerce')
         df = df.dropna(subset=['Thời gian']).sort_values('Thời gian')
     
-    # Chuyển đổi tất cả cột số, thay "" bằng NaN
+    # Chuyển đổi dữ liệu số
     for col in df.columns:
         if col not in ['Thời gian', '_id', 'Tên khu', 'Trạng thái', 'Người điều khiển', 'Phương thức hoạt động']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Chuẩn hóa PH và Nhiệt độ nếu dữ liệu bị nhân 100
-    if 'PH' in df.columns and df['PH'].max() > 50:
+    # Chuẩn hóa đơn vị (pH chia 100, Nhiệt độ chia 100 nếu là số nguyên lớn)
+    if 'PH' in df.columns and df['PH'].max() > 20:
         df['PH'] = df['PH'] / 100
     if 'Nhiệt Độ' in df.columns and df['Nhiệt Độ'].max() > 100:
         df['Nhiệt Độ'] = df['Nhiệt Độ'] / 100
@@ -34,67 +33,60 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # --- BỘ LỌC THỜI GIAN THÔNG MINH ---
-        st.sidebar.header("📅 Bộ lọc thời gian")
+        # --- TÍNH TOÁN KHOẢNG THỜI GIAN THỰC TẾ TRONG FILE ---
         min_dt = df['Thời gian'].min()
         max_dt = df['Thời gian'].max()
 
-        # Hiển thị mốc dữ liệu có sẵn trong file để người dùng biết
-        st.sidebar.info(f"Dữ liệu từ: {min_dt.strftime('%d/%m/%Y')} \nĐến: {max_dt.strftime('%d/%m/%Y')}")
+        st.sidebar.header("📅 Bộ lọc thời gian")
+        st.sidebar.info(f"Dữ liệu có từ: {min_dt.strftime('%d/%m/%Y')}\nĐến: {max_dt.strftime('%d/%m/%Y')}")
 
-        filter_type = st.sidebar.selectbox("Lọc nhanh:", 
-            ["Toàn bộ dữ liệu", "Tùy chỉnh ngày", "7 ngày cuối của dữ liệu", "Tháng cuối của dữ liệu"])
-        
-        if filter_type == "Toàn bộ dữ liệu":
-            start_date, end_date = min_dt, max_dt
-        elif filter_type == "7 ngày cuối của dữ liệu":
-            start_date, end_date = max_dt - timedelta(days=7), max_dt
-        elif filter_type == "Tháng cuối của dữ liệu":
-            start_date, end_date = max_dt - timedelta(days=30), max_dt
-        else:
-            col1, col2 = st.sidebar.columns(2)
-            # Mặc định ngày bắt đầu là ngày nhỏ nhất trong file
-            start_date = pd.to_datetime(col1.date_input("Từ ngày", min_dt))
-            end_date = pd.to_datetime(col2.date_input("Đến ngày", max_dt)) + timedelta(days=1)
+        # Cho phép người dùng chọn khoảng bằng Calendar, mặc định lấy theo mốc trong file
+        col1, col2 = st.sidebar.columns(2)
+        start_date = pd.to_datetime(col1.date_input("Từ ngày", min_dt.date()))
+        end_date = pd.to_datetime(col2.date_input("Đến ngày", max_dt.date())) + timedelta(days=1)
 
-        # Áp dụng bộ lọc
+        # Lọc dữ liệu
         df_filtered = df[(df['Thời gian'] >= start_date) & (df['Thời gian'] <= end_date)]
 
-        # --- HIỂN THỊ THÔNG SỐ (METRICS) ---
-        st.subheader("📝 Thông số đo được")
+        # --- HIỂN THỊ THÔNG SỐ CHI TIẾT (METRICS) ---
+        st.subheader("📋 Thông số hiện tại (Giá trị mới nhất)")
         
         if not df_filtered.empty:
-            cols = st.columns(4)
-            # Danh sách các cột muốn hiển thị thông số nhanh
-            metrics_list = ['Nhiệt Độ', 'Độ ẩm', 'PH', 'EC', 'N', 'P', 'K', 'tempKK', 'humiKK', 'Lưu lượng m2/h']
+            # Ưu tiên các cột quan trọng bao gồm AS (Ánh sáng)
+            important_cols = {
+                'Nhiệt Độ': '🌡️ Nhiệt độ',
+                'Độ ẩm': '💧 Độ ẩm',
+                'AS': '☀️ Ánh sáng',
+                'soil_ASKK': '☀️ Ánh sáng (KK)',
+                'PH': '🧪 pH',
+                'EC': '⚡ EC',
+                'tempKK': '🌡️ Nhiệt độ KK',
+                'humiKK': '💧 Độ ẩm KK'
+            }
             
-            # Lọc ra những cột thực sự có trong file
-            available_metrics = [m for m in metrics_list if m in df_filtered.columns]
+            # Tạo các ô hiển thị số
+            metrics_to_show = [c for c in important_cols.keys() if c in df_filtered.columns]
+            if metrics_to_show:
+                cols = st.columns(len(metrics_to_show))
+                for i, m in enumerate(metrics_to_show):
+                    # Lấy giá trị cuối cùng không bị rỗng
+                    valid_val = df_filtered[m].dropna()
+                    if not valid_val.empty:
+                        val = valid_val.iloc[-1]
+                        cols[i].metric(label=important_cols[m], value=f"{val:.2f}")
+                    else:
+                        cols[i].metric(label=important_cols[m], value="N/A")
             
-            for idx, m in enumerate(available_metrics):
-                # Tìm giá trị cuối cùng KHÔNG RỖNG trong cột đó
-                valid_series = df_filtered[m].dropna()
-                if not valid_series.empty:
-                    last_val = valid_series.iloc[-1]
-                    cols[idx % 4].metric(label=m, value=f"{last_val:.2f}")
-                else:
-                    cols[idx % 4].metric(label=m, value="N/A")
-        else:
-            st.error(f"⚠️ Không có dữ liệu từ {start_date.date()} đến {end_date.date()}. Hãy chọn mốc thời gian khác!")
-
-        # --- BIỂU ĐỒ ĐƯỜNG NỐI LIỀN ---
-        if not df_filtered.empty:
+            # --- VẼ BIỂU ĐỒ ĐƯỜNG Nối Liền ---
             st.markdown("---")
             numeric_cols = df_filtered.select_dtypes(include=['number']).columns.tolist()
-            # Bỏ STT và các cột ID khỏi danh sách vẽ
             draw_cols = [c for c in numeric_cols if c not in ['STT']]
             
-            selected_metrics = st.multiselect("Chọn thông số vẽ biểu đồ:", draw_cols, default=draw_cols[:min(2, len(draw_cols))])
+            selected_metrics = st.multiselect("Chọn thông số vẽ biểu đồ:", draw_cols, default=metrics_to_show[:2])
             
             if selected_metrics:
                 fig = go.Figure()
                 for metric in selected_metrics:
-                    # Loại bỏ giá trị rỗng để đường kẻ được nối liền (không bị đứt đoạn)
                     clean_df = df_filtered[['Thời gian', metric]].dropna()
                     if not clean_df.empty:
                         fig.add_trace(go.Scatter(
@@ -102,20 +94,22 @@ if uploaded_files:
                             y=clean_df[metric],
                             mode='lines+markers', 
                             name=metric,
-                            line=dict(width=2),
-                            marker=dict(size=4)
+                            line=dict(width=2.5),
+                            marker=dict(size=6)
                         ))
                 
                 fig.update_layout(
-                    hovermode="x unified", 
-                    template="plotly_white", 
-                    height=500,
+                    hovermode="x unified",
+                    template="plotly_white",
+                    height=550,
                     xaxis_title="Thời gian",
                     yaxis_title="Giá trị"
                 )
                 st.plotly_chart(fig, use_container_width=True)
-        
-        with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
+        else:
+            st.warning(f"Chưa có dữ liệu trong khoảng từ {start_date.date()} đến {end_date.date()}. Vui lòng chỉnh lại lịch ở bên trái.")
+
+        with st.expander("🔍 Chi tiết bảng dữ liệu"):
             st.dataframe(df_filtered)
 else:
-    st.info("👋 Chào bạn! Hãy tải các file JSON (Quan trắc, Lịch sử...) vào để bắt đầu.")
+    st.info("👋 Hãy tải các file JSON lên để hệ thống phân tích ánh sáng và cảm biến.")

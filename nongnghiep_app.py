@@ -3,22 +3,22 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="CỘNG CỤ PHÂN TÍCH DỮ LIỆU", layout="wide")
-st.title("📈 CỘNG CỤ PHÂN TÍCH DỮ LIỆU")
+st.set_page_config(page_title="CỘNG CỤ XEM DỮ LIỆU", layout="wide")
+st.title("📈CỘNG CỤ XEM DỮ LIỆU ")
 
 def process_data(file):
     df = pd.read_json(file)
     if 'Thời gian' in df.columns:
-        # Xử lý định dạng thời gian đặc biệt từ file của bạn
+        # Chuẩn hóa thời gian và sắp xếp cực kỳ quan trọng
         df['Thời gian'] = pd.to_datetime(df['Thời gian'].astype(str).str.replace('-', ' ', n=2).str.replace('-', ':'), errors='coerce')
-        # Loại bỏ các dòng lỗi thời gian và sắp xếp để không bị rối đường kẻ
         df = df.dropna(subset=['Thời gian']).sort_values('Thời gian')
     
+    # Chuyển đổi dữ liệu số
     for col in df.columns:
-        if col not in ['Thời gian', '_id', 'Tên khu', 'Trạng thái', 'Người điều khiển', 'Phương thức hoạt động']:
+        if col not in ['Thời gian', '_id', 'Tên khu', 'Trạng thái', 'Người điều khiển']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Sửa đơn vị PH và Nhiệt độ nếu cần
+    # Sửa đơn vị PH và Nhiệt độ
     if 'PH' in df.columns and df['PH'].max() > 20: df['PH'] = df['PH'] / 100
     if 'Nhiệt Độ' in df.columns and df['Nhiệt Độ'].max() > 100: df['Nhiệt Độ'] = df['Nhiệt Độ'] / 100
             
@@ -32,63 +32,59 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # --- BỘ LỌC THỜI GIAN THEO DỮ LIỆU THẬT ---
+        # Lấy mốc thời gian trong file
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
-        st.sidebar.info(f"Dữ liệu thực tế: \n{min_dt} -> {max_dt}")
-
+        
+        st.sidebar.header("📅 Lọc thời gian")
         col1, col2 = st.sidebar.columns(2)
         start_date = pd.to_datetime(col1.date_input("Từ ngày", min_dt.date()))
         end_date = pd.to_datetime(col2.date_input("Đến ngày", max_dt.date())) + timedelta(days=1)
         
-        # Lọc dữ liệu theo khoảng thời gian đã chọn
         df_filtered = df[(df['Thời gian'] >= start_date) & (df['Thời gian'] <= end_date)]
 
         # --- HIỂN THỊ THÔNG SỐ (METRICS) ---
         if not df_filtered.empty:
-            # Ưu tiên các cột quan trọng bao gồm AS (Ánh sáng)
-            display_cols = ['Nhiệt Độ', 'Độ ẩm', 'AS', 'soil_ASKK', 'PH', 'EC', 'N', 'P', 'K']
-            metrics_available = [m for m in display_cols if m in df_filtered.columns]
+            st.subheader("📋 Thông số mới nhất")
+            important = ['Nhiệt Độ', 'Độ ẩm', 'AS', 'soil_ASKK', 'PH', 'EC', 'N', 'P', 'K']
+            metrics_avail = [m for m in important if m in df_filtered.columns]
             
-            st.subheader("📋 Giá trị đo được mới nhất")
-            cols = st.columns(len(metrics_available) if len(metrics_available) < 5 else 4)
-            for i, m in enumerate(metrics_available):
-                valid_val = df_filtered[m].dropna()
-                if not valid_val.empty:
-                    val = valid_val.iloc[-1] # Lấy giá trị mới nhất
-                    cols[i % 4].metric(label=m, value=f"{val:.2f}")
+            cols = st.columns(min(len(metrics_avail), 4))
+            for i, m in enumerate(metrics_avail):
+                val = df_filtered[m].dropna()
+                if not val.empty:
+                    cols[i % 4].metric(label=m, value=f"{val.iloc[-1]:.2f}")
 
-            # --- PHẦN VẼ BIỂU ĐỒ ĐƯỜNG (KHÔNG PHẢI CỘT) ---
+            # --- VẼ BIỂU ĐỒ ĐƯỜNG (KHÔNG CÓ CỘT, KHÔNG CÓ ĐIỂM RỜI) ---
             st.markdown("---")
-            numeric_cols = df_filtered.select_dtypes(include=['number']).columns.tolist()
-            draw_cols = [c for c in numeric_cols if c not in ['STT']]
-            
-            selected_metrics = st.multiselect("Chọn thông số vẽ biểu đồ:", draw_cols, default=draw_cols[:min(2, len(draw_cols))])
+            draw_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT']]
+            selected_metrics = st.multiselect("Chọn thông số vẽ:", draw_cols, default=metrics_avail[:2])
             
             if selected_metrics:
                 fig = go.Figure()
                 for metric in selected_metrics:
-                    # Loại bỏ NaN để đường kẻ nối liền mạch, không bị rời rạc như cột
-                    clean_df = df_filtered[['Thời gian', metric]].dropna()
-                    if not clean_df.empty:
+                    # Lấy dữ liệu của riêng cột đó, bỏ qua dòng trống
+                    plot_data = df_filtered[['Thời gian', metric]].dropna()
+                    
+                    if not plot_data.empty:
                         fig.add_trace(go.Scatter(
-                            x=clean_df['Thời gian'], 
-                            y=clean_df[metric],
-                            mode='lines+markers', # ÉP BUỘC VẼ ĐƯỜNG VÀ ĐIỂM
+                            x=plot_data['Thời gian'], 
+                            y=plot_data[metric],
+                            mode='lines',            # CHỈ VẼ ĐƯỜNG (Giống hình mẫu bạn gửi)
                             name=metric,
-                            line=dict(width=1.5), # Đường mảnh
-                            marker=dict(size=4)    # Điểm nhỏ
+                            connectgaps=True,       # Nối các điểm bị thiếu dữ liệu ở giữa
+                            line=dict(width=2)       # Độ dày đường kẻ mảnh vừa phải
                         ))
                 
                 fig.update_layout(
                     hovermode="x unified",
                     template="plotly_white",
-                    xaxis=dict(showgrid=True, nticks=10),
-                    yaxis=dict(showgrid=True),
                     height=600,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    xaxis=dict(showgrid=True, title="Thời gian"),
+                    yaxis=dict(showgrid=True, title="Giá trị"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=1, xanchor="right")
                 )
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Không có dữ liệu trong khoảng này. Hãy chỉnh lịch ở sidebar!")
+            st.warning("Khoảng thời gian này không có dữ liệu.")
 else:
-    st.info("Kéo thả file JSON vào để bắt đầu.")
+    st.info("Kéo thả file vào sidebar để bắt đầu.")

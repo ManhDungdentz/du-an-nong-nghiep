@@ -3,26 +3,36 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Dashboard AH4 Pro", layout="wide")
-st.title("📊 CÔNG CỤ PHÂN TÍCH")
+st.set_page_config(page_title="Dashboard AH4 Full Options", layout="wide")
+st.title("📊 CÔNG CỤ PHÂN TÍCH DỮ LIỆU")
+
+def clean_numeric(x):
+    try:
+        if isinstance(x, str):
+            x = x.replace(',', '.')
+        return pd.to_numeric(x, errors='coerce')
+    except:
+        return None
 
 def process_data(file):
     df = pd.read_json(file)
     if 'Thời gian' in df.columns:
         df['Thời gian'] = pd.to_datetime(df['Thời gian'].astype(str).str.replace('-', ' ', n=2).str.replace('-', ':'), errors='coerce')
         df = df.dropna(subset=['Thời gian']).sort_values('Thời gian')
-        # Gộp dữ liệu trùng giây
-        df = df.groupby('Thời gian').mean(numeric_only=True).reset_index()
     
-    # Ép kiểu số cho tất cả cột trừ thời gian
+    # Ép kiểu số cho tất cả cột để không sót thông số nào (N, P, K, AS, Nhiệt độ...)
     for col in df.columns:
         if col != 'Thời gian':
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].apply(clean_numeric)
             
-    # Tự động sửa đơn vị nếu số quá lớn (PH > 20 hoặc Nhiệt độ > 100)
+    # Gộp dữ liệu trùng giây
+    df = df.groupby('Thời gian').mean(numeric_only=True).reset_index()
+
+    # Tự động sửa đơn vị PH/Nhiệt độ nếu dữ liệu thô bị nhân 100
     for col in df.columns:
-        if 'PH' in col.upper() and df[col].max() > 20: df[col] = df[col] / 100
-        if ('NHIỆT' in col.upper() or 'TEMP' in col.upper()) and df[col].max() > 100: df[col] = df[col] / 100
+        u_col = col.upper()
+        if 'PH' in u_col and df[col].max() > 20: df[col] = df[col] / 100
+        if ('NHIỆT' in u_col or 'TEMP' in u_col) and df[col].max() > 100: df[col] = df[col] / 100
     return df
 
 uploaded_files = st.sidebar.file_uploader("Tải file JSON", type=['json'], accept_multiple_files=True)
@@ -33,7 +43,7 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # Lọc thời gian
+        # Bộ lọc thời gian
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         st.sidebar.header("📅 Lọc thời gian")
         start_date = pd.to_datetime(st.sidebar.date_input("Từ ngày", min_dt.date()))
@@ -42,55 +52,64 @@ if uploaded_files:
         df_filtered = df[(df['Thời gian'] >= start_date) & (df['Thời gian'] <= end_date)].copy()
 
         if not df_filtered.empty:
-            # --- TỰ ĐỘNG TÌM THÔNG SỐ ĐỂ HIỂN THỊ METRIC ---
-            st.subheader("📋 Thông số đo được (Mới nhất)")
-            # Tìm các cột có tên chứa từ khóa tương ứng
-            def find_col(keywords):
-                for k in keywords:
-                    for col in df_filtered.columns:
-                        if k.upper() in col.upper(): return col
-                return None
-
-            m_cols = {
-                "PH": find_col(["TBPH", "PH"]),
-                "EC": find_col(["TBEC", "EC"]),
-                "Lưu lượng": find_col(["Lưu lượng m2/h", "Lưu lượng tổng", "Lưu lượng"])
+            # --- HIỂN THỊ METRICS (QUÉT TẤT CẢ THÔNG SỐ CÓ THỂ) ---
+            st.subheader("📋 Thông số đo được")
+            
+            # Danh sách các nhóm từ khóa để hiển thị lên bảng Metric
+            target_groups = {
+                "Nhiệt Độ": ["Nhiệt Độ", "Temp"],
+                "Độ Ẩm": ["Độ ẩm", "Humi"],
+                "Ánh Sáng": ["AS", "Light"],
+                "PH": ["PH", "TBPH"],
+                "EC": ["EC", "TBEC"],
+                "Lưu Lượng": ["Lưu lượng", "m2/h"],
+                "Nitơ (N)": ["N", "Nitrogen"],
+                "Phốt pho (P)": ["P", "Phosphorus"],
+                "Kali (K)": ["K", "Potassium"]
             }
 
-            display_cols = st.columns(len([v for v in m_cols.values() if v]))
-            idx = 0
-            for label, col_name in m_cols.items():
-                if col_name:
+            # Tìm và hiển thị các cột khớp với nhóm trên
+            found_cols = []
+            for label, keys in target_groups.items():
+                for col in df_filtered.columns:
+                    if any(k.upper() in col.upper() for k in keys):
+                        found_cols.append((label, col))
+                        break # Chỉ lấy 1 cột đại diện cho mỗi nhóm
+
+            if found_cols:
+                m_cols = st.columns(min(len(found_cols), 4))
+                for i, (label, col_name) in enumerate(found_cols):
                     val = df_filtered[col_name].dropna()
                     if not val.empty:
-                        display_cols[idx].metric(label=f"{label} ({col_name})", value=f"{val.iloc[-1]:.2f}")
-                        idx += 1
+                        m_cols[i % 4].metric(label=f"{label}", value=f"{val.iloc[-1]:.2f}")
 
-            # --- BIỂU ĐỒ ---
+            # --- TÙY CHỈNH BIỂU ĐỒ ---
             st.markdown("---")
             c1, c2 = st.columns([1, 2])
-            chart_choice = c1.radio("Kiểu hiển thị:", ["Đường (Line)", "Cột (Bar)"], horizontal=True)
-            step = c1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1)
+            chart_type = c1.radio("Loại biểu đồ:", ["Đường (Line)", "Cột (Bar)"], horizontal=True)
+            step = c1.select_slider("Độ chi tiết (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1)
             
-            numeric_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT']]
-            selected_metrics = c2.multiselect("Chọn thông số vẽ biểu đồ:", numeric_cols, default=numeric_cols[:2] if len(numeric_cols)>1 else numeric_cols)
+            # Lấy tất cả các cột có kiểu số (trừ STT) để cho người dùng chọn vẽ
+            all_numeric = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT']]
+            selected_metrics = c2.multiselect("Chọn thông số muốn xem trên biểu đồ:", all_numeric, default=all_numeric[:2] if len(all_numeric)>1 else all_numeric)
             
             if selected_metrics:
                 fig = go.Figure()
                 display_df = df_filtered.iloc[::step]
-                for metric in selected_metrics:
-                    plot_data = display_df[['Thời gian', metric]].dropna()
-                    if not plot_data.empty:
-                        if "Đường" in chart_choice:
-                            fig.add_trace(go.Scatter(x=plot_data['Thời gian'], y=plot_data[metric], mode='lines', name=metric, line=dict(width=1.2)))
+                for m in selected_metrics:
+                    p_data = display_df[['Thời gian', m]].dropna()
+                    if not p_data.empty:
+                        if "Đường" in chart_type:
+                            fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines', name=m, line=dict(width=1.5)))
                         else:
-                            fig.add_trace(go.Bar(x=plot_data['Thời gian'], y=plot_data[metric], name=metric))
-                
-                fig.update_layout(hovermode="x unified", template="plotly_white", height=500)
+                            fig.add_trace(go.Bar(x=p_data['Thời gian'], y=p_data[m], name=m))
+                fig.update_layout(hovermode="x unified", template="plotly_white", height=500, xaxis_title="Thời gian", yaxis_title="Giá trị")
                 st.plotly_chart(fig, use_container_width=True)
 
-            # --- BẢNG DỮ LIỆU ---
-            st.subheader("🔍 Chi tiết bảng dữ liệu")
+            # --- BẢNG DỮ LIỆU GỐC ---
+            st.subheader("🔍 Toàn bộ bảng dữ liệu chi tiết")
             st.dataframe(df_filtered, use_container_width=True)
+        else:
+            st.warning("Không có dữ liệu trong khoảng thời gian này.")
 else:
-    st.info("Kéo thả file vào sidebar.")
+    st.info("Kéo thả file JSON vào sidebar để bắt đầu.")

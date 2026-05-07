@@ -43,6 +43,11 @@ def process_data(file):
     subset = ['Thời gian', 'STT'] if 'STT' in df.columns else ['Thời gian']
     df = df.drop_duplicates(subset=subset, keep='last')
 
+    # Ép kiểu những cột bị rỗng hoàn toàn về số để không bị lỗi tàng hình
+    for col in df.columns:
+        if col not in skip_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     for col in df.columns:
         if col not in skip_cols and pd.api.types.is_numeric_dtype(df[col]):
             u_col = col.upper()
@@ -66,38 +71,35 @@ if uploaded_files:
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         st.sidebar.header("📅 Lọc thời gian")
         
-        # --- BỘ LỌC NGÀY THÁNG AN TOÀN ---
+        # --- ĐÂY LÀ CHỖ CHỮA BỆNH "MÙ LỊCH" ---
+        # Thêm key=selected_file để lịch bị ép phải reset khi bạn đổi file
         c1, c2 = st.sidebar.columns(2)
-        start_date = c1.date_input("Từ ngày", min_dt.date())
-        end_date = c2.date_input("Đến ngày", max_dt.date())
+        start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
+        end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
         
         if start_date > end_date:
             st.sidebar.error("⚠️ Lỗi: 'Từ ngày' không thể lớn hơn 'Đến ngày'. Vui lòng chọn lại!")
         else:
-            # Ép bộ lọc lấy trọn vẹn đến 23:59:59 của ngày kết thúc
             start_dt = pd.to_datetime(start_date)
             end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
             
             df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
             if not df_filtered.empty:
-                # --- TÁCH TRẠM ĐO ---
                 if 'STT' in df_filtered.columns:
                     stt_options = df_filtered['STT'].dropna().astype(str).unique().tolist()
                     if len(stt_options) > 1:
                         st.sidebar.markdown("---")
                         st.sidebar.header("📍 Tách Trạm/Khu vực")
-                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả (Dễ bị nhiễu)"] + sorted(stt_options))
+                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả"] + sorted(stt_options), key=f"stt_{selected_file}")
                         if "Tất cả" not in selected_stt:
                             df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
-                # Báo cáo xem Trạm đó có hoạt động trong ngày đã chọn không
                 if df_filtered.empty:
-                    st.warning("⚠️ Trong khoảng thời gian bạn chọn, Trạm đo này KHÔNG HOẠT ĐỘNG hoặc máy tắt. Hãy thử mở rộng ngày ra hoặc chọn Trạm khác!")
+                    st.warning("⚠️ Trạm đo này KHÔNG HOẠT ĐỘNG trong những ngày bạn chọn!")
                 else:
                     num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
                     
-                    # Hiện rõ tìm được bao nhiêu lượt đo
                     st.subheader(f"📋 Dữ liệu tìm thấy ({len(df_filtered)} lượt đo)")
                     if num_cols:
                         m_cols = st.columns(4)
@@ -108,10 +110,10 @@ if uploaded_files:
 
                     st.markdown("---")
                     col_1, col_2 = st.columns([1, 2])
-                    chart_type = col_1.radio("Kiểu vẽ:", ["Đường (Line)", "Cột (Bar)"], horizontal=True)
-                    step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1)
+                    chart_type = col_1.radio("Kiểu vẽ:", ["Đường (Line)", "Cột (Bar)"], horizontal=True, key=f"chart_{selected_file}")
+                    step = col_1.select_slider("Độ mảnh:", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
                     
-                    selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))])
+                    selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số:", num_cols, default=num_cols[:min(3, len(num_cols))], key=f"metrics_{selected_file}")
                     
                     if selected_metrics:
                         num_plots = len(selected_metrics)
@@ -130,7 +132,7 @@ if uploaded_files:
                                     trace = go.Bar(x=p_data['Thời gian'], y=p_data[m], name=m)
                                     fig.add_trace(trace, row=i+1, col=1)
                             else:
-                                st.warning(f"⚠️ Thông số '{m}' TRỐNG (Cảm biến bị lỗi hoặc không đo được trong những ngày này).")
+                                st.warning(f"⚠️ Thông số '{m}' TRỐNG hoàn toàn trong giai đoạn này.")
                         
                         fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
                         st.plotly_chart(fig, use_container_width=True)

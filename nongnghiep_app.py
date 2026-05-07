@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots # THÊM THƯ VIỆN NÀY ĐỂ CHIA TẦNG BIỂU ĐỒ
+from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Dashboard AH4 Pro", layout="wide")
-st.title("📊 Hệ Thống Dữ Liệu (Biểu Đồ Tầng Chuyên Nghiệp)")
+st.title("📊 Hệ Thống Dữ Liệu (Biểu Đồ Tầng)")
 
 def process_data(file):
     try:
@@ -18,6 +18,7 @@ def process_data(file):
     else:
         return pd.DataFrame()
     
+    # Ép kiểu số xuyên qua chữ
     for col in df.columns:
         if col != 'Thời gian':
             cleaned_str = df[col].astype(str).str.replace(',', '.')
@@ -26,6 +27,7 @@ def process_data(file):
             
     df = df.groupby('Thời gian').mean(numeric_only=True).reset_index()
 
+    # Sửa đơn vị tự động
     for col in df.columns:
         u_col = col.upper()
         if 'PH' in u_col and df[col].max() > 20: df[col] = df[col] / 100
@@ -66,11 +68,9 @@ if uploaded_files:
             selected_metrics = c2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))])
             
             if selected_metrics:
-                # --- CHIA TẦNG BIỂU ĐỒ (SỬA LỖI ĐÈ BẸP NHAU) ---
+                # CHIA TẦNG BIỂU ĐỒ
                 num_plots = len(selected_metrics)
-                # Tạo khung chứa nhiều biểu đồ xếp dọc
-                fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, 
-                                    vertical_spacing=0.05, subplot_titles=selected_metrics)
+                fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=selected_metrics)
                 
                 display_df = df_filtered.iloc[::step]
                 
@@ -79,5 +79,21 @@ if uploaded_files:
                     
                     if not p_data.empty:
                         if "Đường" in chart_type:
-                            fig.add_trace(go.Scatter(
-                                x=p_data['Thời gian'], y
+                            # Đã căn chỉnh lại dấu ngoặc cho chuẩn xác
+                            trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, connectgaps=True, line=dict(width=1.5))
+                            fig.add_trace(trace, row=i+1, col=1)
+                        else:
+                            trace = go.Bar(x=p_data['Thời gian'], y=p_data[m], name=m)
+                            fig.add_trace(trace, row=i+1, col=1)
+                    else:
+                        st.warning(f"⚠️ Thông số '{m}' KHÔNG CÓ DỮ LIỆU.")
+                
+                fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("🔍 Bảng dữ liệu gốc")
+            st.dataframe(df_filtered, use_container_width=True)
+        else:
+            st.error("Khoảng thời gian này không có dữ liệu.")
+else:
+    st.info("Hãy tải file JSON lên sidebar.")

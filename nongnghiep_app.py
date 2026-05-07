@@ -13,15 +13,16 @@ def clean_numeric(x):
     x = str(x).strip()
     if x == "": return None
     
-    # Bóc tách định dạng ngày giờ dính liền số (VD: 14-01-01/32.35)
-    if '/' in x:
-        try:
-            val = x.split(' ')[0].split('/')[1]
-            return float(val)
-        except:
-            pass
+    # 1. SỬA LỖI CHÍNH: Lấy giá trị CUỐI CÙNG (mới nhất) trong chuỗi lịch sử
+    # Ví dụ: "14-01-01/32.35 14-01-08/32.36" -> Lấy 32.36
+    try:
+        matches = re.findall(r'\d+-\d+-\d+/([-+]?(?:\d+\.\d+|\d+))', x)
+        if matches:
+            return float(matches[-1]) # <-- Ép buộc lấy số ở cuối chuỗi
+    except:
+        pass
             
-    # Ép kiểu xuyên chữ, lấy con số thực tế
+    # 2. Xử lý các con số bình thường
     try:
         match = re.search(r'[-+]?(?:\d+\.\d+|\d+)', x.replace(',', '.'))
         if match:
@@ -41,28 +42,27 @@ def process_data(file):
     else:
         return pd.DataFrame()
     
-    # Giữ lại cột STT để làm bộ lọc, không ép kiểu nó
+    # Ép kiểu cho các cột cảm biến
     skip_cols = ['Thời gian', '_id', 'STT', 'Tên khu', 'Trạng thái', 'Phương thức hoạt động', 'Người điều khiển', 'Bơm', 'Van', 'Ngưỡng tưới']
     for col in df.columns:
         if col not in skip_cols:
             df[col] = df[col].apply(clean_numeric)
             
-    # XÓA LỆNH GROUPBY CŨ ĐỂ KHÔNG BỊ MẤT CỘT STT
+    # Lọc trùng lặp theo Trạm và Thời gian
     subset = ['Thời gian', 'STT'] if 'STT' in df.columns else ['Thời gian']
     df = df.drop_duplicates(subset=subset, keep='last')
 
-    # Tự động chia lại tỷ lệ chuẩn xác hơn (Chia 10 hoặc 100 tùy độ lớn)
+    # Chỉnh lại tỷ lệ cho chuẩn xác
     for col in df.columns:
         if col not in skip_cols and pd.api.types.is_numeric_dtype(df[col]):
             u_col = col.upper()
             max_val = df[col].max()
-            
             if 'PH' in u_col and max_val > 14:
                 df[col] = df[col] / (100 if max_val > 140 else 10)
             elif ('NHIỆT' in u_col or 'TEMP' in u_col) and max_val > 100:
-                df[col] = df[col] / (100 if max_val >= 1000 else 10) # 370 chia 10 = 37.0°C
+                df[col] = df[col] / (100 if max_val >= 1000 else 10)
             elif ('ẨM' in u_col or 'HUMI' in u_col) and max_val > 100:
-                df[col] = df[col] / (100 if max_val >= 1000 else 10) # 394 chia 10 = 39.4%
+                df[col] = df[col] / (100 if max_val >= 1000 else 10)
     return df
 
 uploaded_files = st.sidebar.file_uploader("Tải file JSON", type=['json'], accept_multiple_files=True)
@@ -81,19 +81,14 @@ if uploaded_files:
         df_filtered = df[(df['Thời gian'] >= start_date) & (df['Thời gian'] <= end_date)].copy()
 
         if not df_filtered.empty:
-            # --- TÍNH NĂNG MỚI: LỌC THEO TRẠM/STT ĐỂ TRÁNH NHIỄU SÓNG ---
+            # Tách trạm đo
             if 'STT' in df_filtered.columns:
                 stt_options = df_filtered['STT'].dropna().astype(str).unique().tolist()
                 if len(stt_options) > 1:
                     st.sidebar.markdown("---")
                     st.sidebar.header("📍 Tách Trạm/Khu vực")
-                    # Thêm Dropdown chọn STT
-                    selected_stt = st.sidebar.selectbox(
-                        "Chọn Trạm đo (STT):", 
-                        ["Tất cả (Dễ bị nhiễu sóng)"] + sorted(stt_options)
-                    )
+                    selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả"] + sorted(stt_options))
                     if "Tất cả" not in selected_stt:
-                        # Chỉ giữ lại dữ liệu của trạm đã chọn
                         df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
             num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
@@ -130,7 +125,7 @@ if uploaded_files:
                             trace = go.Bar(x=p_data['Thời gian'], y=p_data[m], name=m)
                             fig.add_trace(trace, row=i+1, col=1)
                     else:
-                        st.warning(f"⚠️ Thông số '{m}' KHÔNG CÓ DỮ LIỆU trong khoảng thời gian hoặc Trạm đã chọn.")
+                        st.warning(f"⚠️ Thông số '{m}' KHÔNG CÓ DỮ LIỆU.")
                 
                 fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
                 st.plotly_chart(fig, use_container_width=True)

@@ -12,11 +12,12 @@ def clean_numeric(x):
     if pd.isna(x): return None
     x = str(x).strip()
     if x == "": return None
+    
     try:
-        # Lấy số mới nhất ở cuối chuỗi lịch sử (Ví dụ: "14-01-01/32.35 14-01-08/32.36" -> Lấy 32.36)
         matches = re.findall(r'\d+-\d+-\d+/([-+]?(?:\d+\.\d+|\d+))', x)
         if matches: return float(matches[-1])
     except: pass
+            
     try:
         match = re.search(r'[-+]?(?:\d+\.\d+|\d+)', x.replace(',', '.'))
         if match: return float(match.group(0))
@@ -27,19 +28,31 @@ def process_data(file):
     try:
         df = pd.read_json(file)
     except: return pd.DataFrame()
+
     if 'Thời gian' in df.columns:
         df['Thời gian'] = pd.to_datetime(df['Thời gian'].astype(str).str.replace('-', ' ', n=2).str.replace('-', ':'), errors='coerce')
         df = df.dropna(subset=['Thời gian']).sort_values('Thời gian')
-    else: return pd.DataFrame()
+    else:
+        return pd.DataFrame()
     
     skip_cols = ['Thời gian', '_id', 'STT', 'Tên khu', 'Trạng thái', 'Phương thức hoạt động', 'Người điều khiển', 'Bơm', 'Van', 'Ngưỡng tưới']
     for col in df.columns:
         if col not in skip_cols:
             df[col] = df[col].apply(clean_numeric)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
             
     subset = ['Thời gian', 'STT'] if 'STT' in df.columns else ['Thời gian']
     df = df.drop_duplicates(subset=subset, keep='last')
+
+    for col in df.columns:
+        if col not in skip_cols and pd.api.types.is_numeric_dtype(df[col]):
+            u_col = col.upper()
+            max_val = df[col].max()
+            if 'PH' in u_col and max_val > 14:
+                df[col] = df[col] / (100 if max_val > 140 else 10)
+            elif ('NHIỆT' in u_col or 'TEMP' in u_col) and max_val > 100:
+                df[col] = df[col] / (100 if max_val >= 1000 else 10)
+            elif ('ẨM' in u_col or 'HUMI' in u_col) and max_val > 100:
+                df[col] = df[col] / (100 if max_val >= 1000 else 10)
     return df
 
 uploaded_files = st.sidebar.file_uploader("Tải file JSON", type=['json'], accept_multiple_files=True)
@@ -52,71 +65,80 @@ if uploaded_files:
     if not df.empty:
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         st.sidebar.header("📅 Lọc thời gian")
+        
+        # --- BỘ LỌC NGÀY THÁNG AN TOÀN ---
         c1, c2 = st.sidebar.columns(2)
-        # Sử dụng key để reset lịch khi đổi file (fix lỗi kẹt năm 2025)
+        # Gắn key để tránh lỗi bộ lịch bị kẹt nhớ mốc thời gian của file cũ
         start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
         end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
         
-        st.sidebar.markdown("---")
-        st.sidebar.header("⚙️ Chế độ hiển thị")
-        use_sma = st.sidebar.checkbox("Bật Trung bình cộng (Làm mượt)", value=False)
-        window_size = 1
-        if use_sma:
-            window_size = st.sidebar.slider("Độ mượt (Số mẫu):", 2, 100, 20)
-
-        if start_date <= end_date:
+        if start_date > end_date:
+            st.sidebar.error("⚠️ Lỗi: 'Từ ngày' không thể lớn hơn 'Đến ngày'. Vui lòng chọn lại!")
+        else:
+            # Ép bộ lọc lấy trọn vẹn đến 23:59:59 của ngày kết thúc
             start_dt = pd.to_datetime(start_date)
             end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
+            
             df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
             if not df_filtered.empty:
+                # --- TÁCH TRẠM ĐO ---
                 if 'STT' in df_filtered.columns:
                     stt_options = df_filtered['STT'].dropna().astype(str).unique().tolist()
                     if len(stt_options) > 1:
-                        selected_stt = st.sidebar.selectbox("📍 Chọn Trạm (STT):", ["Tất cả"] + sorted(stt_options), key=f"stt_{selected_file}")
+                        st.sidebar.markdown("---")
+                        st.sidebar.header("📍 Tách Trạm/Khu vực")
+                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả (Dễ bị nhiễu)"] + sorted(stt_options), key=f"stt_{selected_file}")
                         if "Tất cả" not in selected_stt:
                             df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
-                num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
-                st.subheader(f"📋 Dữ liệu tìm thấy ({len(df_filtered)} lượt đo)")
-                
-                if num_cols:
-                    m_cols = st.columns(4)
-                    for i, col_name in enumerate(num_cols[:12]):
-                        val = df_filtered[col_name].dropna()
-                        if not val.empty:
-                            m_cols[i % 4].metric(label=col_name, value=f"{val.iloc[-1]:.2f}")
+                # Báo cáo xem Trạm đó có hoạt động trong ngày đã chọn không
+                if df_filtered.empty:
+                    st.warning("⚠️ Trong khoảng thời gian bạn chọn, Trạm đo này KHÔNG HOẠT ĐỘNG hoặc máy tắt. Hãy thử mở rộng ngày ra hoặc chọn Trạm khác!")
+                else:
+                    num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
+                    
+                    # Hiện rõ tìm được bao nhiêu lượt đo
+                    st.subheader(f"📋 Dữ liệu tìm thấy ({len(df_filtered)} lượt đo)")
+                    if num_cols:
+                        m_cols = st.columns(4)
+                        for i, col_name in enumerate(num_cols[:12]):
+                            val = df_filtered[col_name].dropna()
+                            if not val.empty:
+                                m_cols[i % 4].metric(label=col_name, value=f"{val.iloc[-1]:.2f}")
 
-                st.markdown("---")
-                # Cho phép chọn nhiều thông số
-                selected_metrics = st.multiselect("Bấm vào đây để THÊM thông số vẽ biểu đồ:", num_cols, default=num_cols[:min(2, len(num_cols))], key=f"met_{selected_file}")
-                
-                if selected_metrics:
-                    num_plots = len(selected_metrics)
-                    # Giảm vertical_spacing để tiết kiệm diện tích cho biểu đồ chính
-                    fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.03, subplot_titles=selected_metrics)
+                    st.markdown("---")
+                    col_1, col_2 = st.columns([1, 2])
                     
-                    for i, m in enumerate(selected_metrics):
-                        p_data = df_filtered[['Thời gian', m]].dropna()
-                        if not p_data.empty:
-                            y_values = p_data[m]
-                            label_name = m
-                            if use_sma:
-                                y_values = y_values.rolling(window=window_size, min_periods=1).mean()
-                                label_name = f"{m} (Mượt)"
+                    # Đã xóa phần radio button chọn "Kiểu vẽ" ở đây
+                    step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
+                    
+                    selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))], key=f"metrics_{selected_file}")
+                    
+                    if selected_metrics:
+                        num_plots = len(selected_metrics)
+                        fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=selected_metrics)
+                        
+                        display_df = df_filtered.iloc[::step]
+                        
+                        for i, m in enumerate(selected_metrics):
+                            p_data = display_df[['Thời gian', m]].dropna()
                             
-                            # Chế độ 'lines' để bỏ chấm tròn rối mắt
-                            fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=y_values, mode='lines', name=label_name, line=dict(width=2)), row=i+1, col=1)
+                            if not p_data.empty:
+                                # Mặc định chỉ dùng biểu đồ đường (Scatter mode='lines+markers')
+                                trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, connectgaps=True, line=dict(width=1.5))
+                                fig.add_trace(trace, row=i+1, col=1)
+                            else:
+                                st.warning(f"⚠️ Thông số '{m}' TRỐNG (Cảm biến bị lỗi hoặc không đo được trong những ngày này).")
+                        
+                        fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
+                        st.plotly_chart(fig, use_container_width=True)
                     
-                    # TĂNG CHIỀU CAO LÊN 500 MỖI BIỂU ĐỒ ĐỂ NHÌN RÕ HƠN
-                    fig.update_layout(height=500 * num_plots, showlegend=True, hovermode="x unified", template="plotly_white", margin=dict(t=50, b=50))
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with st.expander("🔍 Xem bảng dữ liệu gốc"):
+                    st.subheader("🔍 Bảng dữ liệu gốc")
                     st.dataframe(df_filtered, use_container_width=True)
             else:
-                st.warning("⚠️ Không tìm thấy dữ liệu trong khoảng thời gian này.")
+                st.error("❌ Không tìm thấy dữ liệu nào trong các ngày này.")
     else:
-        st.info("File rỗng hoặc không đúng định dạng.")
+        st.info("File này không có dữ liệu hợp lệ để hiển thị.")
 else:
-    st.info("Vui lòng tải file JSON ở thanh công cụ bên trái.")
+    st.info("Hãy tải file JSON lên sidebar.")

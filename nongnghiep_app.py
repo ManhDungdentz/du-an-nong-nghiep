@@ -68,8 +68,9 @@ if uploaded_files:
         
         # --- BỘ LỌC NGÀY THÁNG AN TOÀN ---
         c1, c2 = st.sidebar.columns(2)
-        start_date = c1.date_input("Từ ngày", min_dt.date())
-        end_date = c2.date_input("Đến ngày", max_dt.date())
+        # Gắn key để tránh lỗi bộ lịch bị kẹt nhớ mốc thời gian của file cũ
+        start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
+        end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
         
         if start_date > end_date:
             st.sidebar.error("⚠️ Lỗi: 'Từ ngày' không thể lớn hơn 'Đến ngày'. Vui lòng chọn lại!")
@@ -87,7 +88,7 @@ if uploaded_files:
                     if len(stt_options) > 1:
                         st.sidebar.markdown("---")
                         st.sidebar.header("📍 Tách Trạm/Khu vực")
-                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả (Dễ bị nhiễu)"] + sorted(stt_options))
+                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả (Dễ bị nhiễu)"] + sorted(stt_options), key=f"stt_{selected_file}")
                         if "Tất cả" not in selected_stt:
                             df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
@@ -108,10 +109,11 @@ if uploaded_files:
 
                     st.markdown("---")
                     col_1, col_2 = st.columns([1, 2])
-                    chart_type = col_1.radio("Kiểu vẽ:", ["Đường (Line)", "Cột (Bar)"], horizontal=True)
-                    step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1)
                     
-                    selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))])
+                    # Đã xóa phần radio button chọn "Kiểu vẽ" ở đây
+                    step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
+                    
+                    selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))], key=f"metrics_{selected_file}")
                     
                     if selected_metrics:
                         num_plots = len(selected_metrics)
@@ -123,12 +125,9 @@ if uploaded_files:
                             p_data = display_df[['Thời gian', m]].dropna()
                             
                             if not p_data.empty:
-                                if "Đường" in chart_type:
-                                    trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, connectgaps=True, line=dict(width=1.5))
-                                    fig.add_trace(trace, row=i+1, col=1)
-                                else:
-                                    trace = go.Bar(x=p_data['Thời gian'], y=p_data[m], name=m)
-                                    fig.add_trace(trace, row=i+1, col=1)
+                                # Mặc định chỉ dùng biểu đồ đường (Scatter mode='lines+markers')
+                                trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, connectgaps=True, line=dict(width=1.5))
+                                fig.add_trace(trace, row=i+1, col=1)
                             else:
                                 st.warning(f"⚠️ Thông số '{m}' TRỐNG (Cảm biến bị lỗi hoặc không đo được trong những ngày này).")
                         

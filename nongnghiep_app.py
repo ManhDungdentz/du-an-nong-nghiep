@@ -13,6 +13,7 @@ def clean_numeric(x):
     x = str(x).strip()
     if x == "": return None
     try:
+        # Lấy số mới nhất ở cuối chuỗi lịch sử (Ví dụ: "14-01-01/32.35 14-01-08/32.36" -> Lấy 32.36)
         matches = re.findall(r'\d+-\d+-\d+/([-+]?(?:\d+\.\d+|\d+))', x)
         if matches: return float(matches[-1])
     except: pass
@@ -52,16 +53,16 @@ if uploaded_files:
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         st.sidebar.header("📅 Lọc thời gian")
         c1, c2 = st.sidebar.columns(2)
+        # Sử dụng key để reset lịch khi đổi file (fix lỗi kẹt năm 2025)
         start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
         end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
         
-        # --- CHẾ ĐỘ TRUNG BÌNH CỘNG ---
         st.sidebar.markdown("---")
         st.sidebar.header("⚙️ Chế độ hiển thị")
-        use_sma = st.sidebar.checkbox("Bật Trung bình cộng (Làm mượt)", value=False, help="Giúp loại bỏ các điểm dữ liệu nhiễu/ảo")
+        use_sma = st.sidebar.checkbox("Bật Trung bình cộng (Làm mượt)", value=False)
         window_size = 1
         if use_sma:
-            window_size = st.sidebar.slider("Độ mượt (Số lượng mẫu):", 2, 50, 10)
+            window_size = st.sidebar.slider("Độ mượt (Số mẫu):", 2, 100, 20)
 
         if start_date <= end_date:
             start_dt = pd.to_datetime(start_date)
@@ -72,7 +73,7 @@ if uploaded_files:
                 if 'STT' in df_filtered.columns:
                     stt_options = df_filtered['STT'].dropna().astype(str).unique().tolist()
                     if len(stt_options) > 1:
-                        selected_stt = st.sidebar.selectbox("Chọn Trạm đo (STT):", ["Tất cả"] + sorted(stt_options), key=f"stt_{selected_file}")
+                        selected_stt = st.sidebar.selectbox("📍 Chọn Trạm (STT):", ["Tất cả"] + sorted(stt_options), key=f"stt_{selected_file}")
                         if "Tất cả" not in selected_stt:
                             df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
@@ -87,33 +88,35 @@ if uploaded_files:
                             m_cols[i % 4].metric(label=col_name, value=f"{val.iloc[-1]:.2f}")
 
                 st.markdown("---")
+                # Cho phép chọn nhiều thông số
                 selected_metrics = st.multiselect("Bấm vào đây để THÊM thông số vẽ biểu đồ:", num_cols, default=num_cols[:min(2, len(num_cols))], key=f"met_{selected_file}")
                 
                 if selected_metrics:
                     num_plots = len(selected_metrics)
-                    fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.07, subplot_titles=selected_metrics)
+                    # Giảm vertical_spacing để tiết kiệm diện tích cho biểu đồ chính
+                    fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.03, subplot_titles=selected_metrics)
                     
                     for i, m in enumerate(selected_metrics):
                         p_data = df_filtered[['Thời gian', m]].dropna()
                         if not p_data.empty:
-                            # Xử lý làm mượt nếu bật chế độ SMA
                             y_values = p_data[m]
                             label_name = m
                             if use_sma:
                                 y_values = y_values.rolling(window=window_size, min_periods=1).mean()
-                                label_name = f"{m} (Đã làm mượt)"
+                                label_name = f"{m} (Mượt)"
                             
-                            # Vẽ đường (Đã bỏ mode 'markers')
+                            # Chế độ 'lines' để bỏ chấm tròn rối mắt
                             fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=y_values, mode='lines', name=label_name, line=dict(width=2)), row=i+1, col=1)
                     
-                    fig.update_layout(height=350 * num_plots, showlegend=True, hovermode="x unified", template="plotly_white")
+                    # TĂNG CHIỀU CAO LÊN 500 MỖI BIỂU ĐỒ ĐỂ NHÌN RÕ HƠN
+                    fig.update_layout(height=500 * num_plots, showlegend=True, hovermode="x unified", template="plotly_white", margin=dict(t=50, b=50))
                     st.plotly_chart(fig, use_container_width=True)
                 
-                with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
+                with st.expander("🔍 Xem bảng dữ liệu gốc"):
                     st.dataframe(df_filtered, use_container_width=True)
             else:
-                st.error("❌ Không có dữ liệu trong khoảng ngày này.")
+                st.warning("⚠️ Không tìm thấy dữ liệu trong khoảng thời gian này.")
     else:
-        st.info("File rỗng hoặc sai định dạng.")
+        st.info("File rỗng hoặc không đúng định dạng.")
 else:
-    st.info("Vui lòng tải file JSON ở bên trái.")
+    st.info("Vui lòng tải file JSON ở thanh công cụ bên trái.")

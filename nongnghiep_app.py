@@ -6,16 +6,18 @@ from datetime import timedelta
 import re
 
 st.set_page_config(page_title="Dashboard AH4 Pro", layout="wide")
-st.title("📊 Hệ Thống Dữ Liệu Pro")
+st.title("📊 Hệ Thống Dữ Liệu")
 
 def clean_numeric(x):
     if pd.isna(x): return None
     x = str(x).strip()
     if x == "": return None
+    
     try:
         matches = re.findall(r'\d+-\d+-\d+/([-+]?(?:\d+\.\d+|\d+))', x)
         if matches: return float(matches[-1])
     except: pass
+            
     try:
         match = re.search(r'[-+]?(?:\d+\.\d+|\d+)', x.replace(',', '.'))
         if match: return float(match.group(0))
@@ -74,19 +76,20 @@ if uploaded_files:
         thong_ke['Sort'] = pd.to_datetime(thong_ke['Tháng'], format='%m/%Y')
         thong_ke = thong_ke.sort_values('Sort').drop('Sort', axis=1)
         st.sidebar.dataframe(thong_ke, hide_index=True, use_container_width=True)
-        
-        # --- BỘ LỌC NGÀY THÁNG ---
+
         st.sidebar.markdown("---")
         st.sidebar.header("📅 Lọc thời gian")
+        
         c1, c2 = st.sidebar.columns(2)
         start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
         end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
-
+        
         if start_date > end_date:
             st.sidebar.error("⚠️ Lỗi: 'Từ ngày' không thể lớn hơn 'Đến ngày'. Vui lòng chọn lại!")
         else:
             start_dt = pd.to_datetime(start_date)
             end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
+            
             df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
             if not df_filtered.empty:
@@ -100,7 +103,7 @@ if uploaded_files:
                             df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
 
                 if df_filtered.empty:
-                    st.warning("⚠️ Trạm đo này không hoạt động trong các ngày đã chọn.")
+                    st.warning("⚠️ Trong khoảng thời gian bạn chọn, Trạm đo này KHÔNG HOẠT ĐỘNG hoặc máy tắt. Hãy thử mở rộng ngày ra hoặc chọn Trạm khác!")
                 else:
                     num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
                     
@@ -114,30 +117,32 @@ if uploaded_files:
 
                     st.markdown("---")
                     col_1, col_2 = st.columns([1, 2])
+                    
                     step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
                     selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", num_cols, default=num_cols[:min(3, len(num_cols))], key=f"metrics_{selected_file}")
                     
                     if selected_metrics:
                         num_plots = len(selected_metrics)
-                        fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.04, subplot_titles=selected_metrics)
+                        fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=selected_metrics)
                         
                         display_df = df_filtered.iloc[::step]
                         
                         for i, m in enumerate(selected_metrics):
                             p_data = display_df[['Thời gian', m]].dropna()
+                            
                             if not p_data.empty:
-                                # Vẽ đường dữ liệu gốc, không có chấm tròn (mode='lines')
-                                trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines', name=m, connectgaps=True, line=dict(width=1.5))
+                                # Trả lại kiểu vẽ mặc định lines+markers (có chấm tròn)
+                                trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, connectgaps=True, line=dict(width=1.5))
                                 fig.add_trace(trace, row=i+1, col=1)
                             else:
-                                st.warning(f"⚠️ Thông số '{m}' TRỐNG.")
+                                st.warning(f"⚠️ Thông số '{m}' TRỐNG (Cảm biến bị lỗi hoặc không đo được trong những ngày này).")
                         
-                        # Chiều cao vẫn giữ 500px để không bị bóp nghẹt
-                        fig.update_layout(height=500 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white", margin=dict(t=40, b=40))
+                        # Trả lại chiều cao gốc 300px
+                        fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
                         st.plotly_chart(fig, use_container_width=True)
                     
-                    with st.expander("🔍 Bảng dữ liệu gốc"):
-                        st.dataframe(df_filtered, use_container_width=True)
+                    st.subheader("🔍 Bảng dữ liệu gốc")
+                    st.dataframe(df_filtered, use_container_width=True)
             else:
                 st.error("❌ Không tìm thấy dữ liệu nào trong các ngày này.")
     else:

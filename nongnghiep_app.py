@@ -6,7 +6,7 @@ from datetime import timedelta
 import re
 
 st.set_page_config(page_title="Dashboard AH4 Pro", layout="wide")
-st.title("📊 Hệ Thống Dữ Liệu Pro (Hiệu ứng Kép)")
+st.title("📊 Hệ Thống Dữ Liệu Pro")
 
 def clean_numeric(x):
     if pd.isna(x): return None
@@ -63,6 +63,7 @@ if uploaded_files:
     if not df.empty:
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         
+        # --- BẢNG THỐNG KÊ THÁNG CÓ DỮ LIỆU ---
         st.sidebar.markdown("---")
         st.sidebar.header("🗓️ Tháng nào có dữ liệu?")
         
@@ -74,18 +75,12 @@ if uploaded_files:
         thong_ke = thong_ke.sort_values('Sort').drop('Sort', axis=1)
         st.sidebar.dataframe(thong_ke, hide_index=True, use_container_width=True)
         
+        # --- BỘ LỌC NGÀY THÁNG ---
         st.sidebar.markdown("---")
         st.sidebar.header("📅 Lọc thời gian")
         c1, c2 = st.sidebar.columns(2)
         start_date = c1.date_input("Từ ngày", min_dt.date(), key=f"start_{selected_file}")
         end_date = c2.date_input("Đến ngày", max_dt.date(), key=f"end_{selected_file}")
-        
-        st.sidebar.markdown("---")
-        st.sidebar.header("⚙️ Chế độ hiển thị")
-        use_sma = st.sidebar.checkbox("Bật Trung bình cộng (Làm mượt)", value=False)
-        window_size = 1
-        if use_sma:
-            window_size = st.sidebar.slider("Độ mượt (Số mẫu):", 2, 100, 20)
 
         if start_date > end_date:
             st.sidebar.error("⚠️ Lỗi: 'Từ ngày' không thể lớn hơn 'Đến ngày'. Vui lòng chọn lại!")
@@ -128,25 +123,16 @@ if uploaded_files:
                         
                         display_df = df_filtered.iloc[::step]
                         
-                        # --- BẢN CẬP NHẬT VẼ 2 ĐƯỜNG SO SÁNH ---
                         for i, m in enumerate(selected_metrics):
                             p_data = display_df[['Thời gian', m]].dropna()
                             if not p_data.empty:
-                                if use_sma:
-                                    # Vẽ đường dữ liệu gốc mờ mờ ở dưới nền
-                                    fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines', name=f"{m} (Gốc)", line=dict(width=1, color='rgba(150, 150, 150, 0.4)'), showlegend=False), row=i+1, col=1)
-                                    
-                                    # Tính toán và vẽ đường mượt đậm lên trên
-                                    y_values = p_data[m].rolling(window=window_size, min_periods=1).mean()
-                                    trace = go.Scatter(x=p_data['Thời gian'], y=y_values, mode='lines', name=f"{m} (Mượt)", connectgaps=True, line=dict(width=2.5))
-                                else:
-                                    # Nếu không bật mượt thì chỉ vẽ đường gốc bình thường
-                                    trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines', name=m, connectgaps=True, line=dict(width=1.5))
-                                
+                                # Vẽ đường dữ liệu gốc, không có chấm tròn (mode='lines')
+                                trace = go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines', name=m, connectgaps=True, line=dict(width=1.5))
                                 fig.add_trace(trace, row=i+1, col=1)
                             else:
                                 st.warning(f"⚠️ Thông số '{m}' TRỐNG.")
                         
+                        # Chiều cao vẫn giữ 500px để không bị bóp nghẹt
                         fig.update_layout(height=500 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white", margin=dict(t=40, b=40))
                         st.plotly_chart(fig, use_container_width=True)
                     

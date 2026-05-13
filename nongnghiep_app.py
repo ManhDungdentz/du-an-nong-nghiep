@@ -88,7 +88,6 @@ if uploaded_files:
             df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
             if not df_filtered.empty:
-                # Lọc trạm
                 if 'STT' in df_filtered.columns:
                     stt_options = df_filtered['STT'].dropna().astype(str).unique().tolist()
                     if len(stt_options) > 1:
@@ -100,35 +99,40 @@ if uploaded_files:
                 if df_filtered.empty:
                     st.warning("⚠️ Trạm này không hoạt động trong ngày đã chọn.")
                 else:
-                    # Lọc lấy các cột số có dữ liệu thực tế (không rỗng hoàn toàn)
                     num_cols = [c for c in df_filtered.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
                     valid_cols = [c for c in num_cols if not df_filtered[c].dropna().empty]
                     
                     st.subheader(f"📋 Dữ liệu tìm thấy ({len(df_filtered)} lượt đo)")
                     
-                    # Hiển thị Metric
+                    # --- HIỂN THỊ METRIC (Giá trị mới nhất) ---
                     if valid_cols:
                         m_cols = st.columns(4)
                         for i, col_name in enumerate(valid_cols[:12]):
                             val = df_filtered[col_name].dropna()
                             if not val.empty:
-                                m_cols[i % 4].metric(label=col_name, value=f"{val.iloc[-1]:.2f}")
+                                m_cols[i % 4].metric(label=f"{col_name} (Hiện tại)", value=f"{val.iloc[-1]:.2f}")
+
+                        # --- BỔ SUNG: BẢNG GIÁ TRỊ TRUNG BÌNH ---
+                        st.markdown("### 📈 Thống kê giá trị trung bình")
+                        avg_data = []
+                        for col in valid_cols:
+                            mean_val = df_filtered[col].mean()
+                            max_val = df_filtered[col].max()
+                            min_val = df_filtered[col].min()
+                            avg_data.append({"Thông số": col, "Trung bình": f"{mean_val:.2f}", "Lớn nhất": f"{max_val:.2f}", "Nhỏ nhất": f"{min_val:.2f}"})
+                        
+                        st.table(pd.DataFrame(avg_data))
 
                     st.markdown("---")
                     col_1, col_2 = st.columns([1, 2])
-                    step = col_1.select_slider("Độ mảnh:", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
-                    
-                    # Chỉ cho chọn những cột THỰC SỰ CÓ DỮ LIỆU
+                    step = col_1.select_slider("Độ mảnh (Bước nhảy):", options=[1, 2, 5, 10, 50], value=1, key=f"step_{selected_file}")
                     selected_metrics = col_2.multiselect("Bấm vào đây để THÊM thông số vẽ:", valid_cols, default=valid_cols[:min(3, len(valid_cols))], key=f"metrics_{selected_file}")
                     
                     if selected_metrics:
-                        # Kiểm tra lại lần nữa để loại bỏ các cột bị trống trong tập dữ liệu sau khi skip (step)
                         final_metrics = [m for m in selected_metrics if not df_filtered[m].iloc[::step].dropna().empty]
-                        
                         if final_metrics:
                             num_plots = len(final_metrics)
                             fig = make_subplots(rows=num_plots, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=final_metrics)
-                            
                             display_df = df_filtered.iloc[::step]
                             for i, m in enumerate(final_metrics):
                                 p_data = display_df[['Thời gian', m]].dropna()
@@ -138,7 +142,7 @@ if uploaded_files:
                             fig.update_layout(height=300 * num_plots, showlegend=False, hovermode="x unified", template="plotly_white")
                             st.plotly_chart(fig, use_container_width=True)
                         else:
-                            st.info("💡 Độ mảnh quá lớn khiến các điểm dữ liệu bị lướt qua. Hãy giảm 'Độ mảnh' xuống 1.")
+                            st.info("💡 Không có dữ liệu để vẽ biểu đồ ở độ mảnh này.")
                     
                     with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
                         st.dataframe(df_filtered, use_container_width=True)

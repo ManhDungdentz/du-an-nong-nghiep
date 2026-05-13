@@ -61,9 +61,18 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # --- Sidebar Cấu hình ---
+        # --- Sidebar: Thống kê tháng ---
         st.sidebar.markdown("---")
-        view_mode = st.sidebar.selectbox("Chế độ hiển thị:", 
+        st.sidebar.header("🗓️ Thống kê dữ liệu")
+        df_stats = df.copy()
+        df_stats['Tháng'] = df_stats['Thời gian'].dt.strftime('%m/%Y')
+        thong_ke = df_stats['Tháng'].value_counts().reset_index()
+        thong_ke.columns = ['Tháng', 'Số lượt đo']
+        st.sidebar.dataframe(thong_ke, hide_index=True)
+
+        # --- Sidebar: Cấu hình hiển thị ---
+        st.sidebar.markdown("---")
+        view_mode = st.sidebar.selectbox("Chế độ hiển thị biểu đồ:", 
                                          ["Dữ liệu gốc (Dùng bước nhảy)", 
                                           "Trung bình theo Giờ", 
                                           "Trung bình theo Ngày"])
@@ -80,7 +89,7 @@ if uploaded_files:
         end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
         df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
-        # --- LỌC KHU VỰC (STT) ---
+        # --- Lọc Khu vực (STT) ---
         if 'STT' in df_filtered.columns:
             stt_options = sorted(df_filtered['STT'].dropna().unique().tolist())
             if len(stt_options) > 1:
@@ -92,7 +101,7 @@ if uploaded_files:
         if not df_filtered.empty:
             st.subheader(f"📊 Biểu đồ ({view_mode})")
             
-            # --- Xử lý Dữ liệu ---
+            # --- Xử lý Dữ liệu biểu đồ ---
             if "Trung bình" in view_mode:
                 freq = '1h' if "Giờ" in view_mode else '1D'
                 df_plot = df_filtered.set_index('Thời gian').resample(freq).mean(numeric_only=True).reset_index()
@@ -122,6 +131,6 @@ if uploaded_files:
             with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
                 st.dataframe(df_plot, use_container_width=True)
         else:
-            st.warning("⚠️ Không tìm thấy dữ liệu cho khu vực hoặc thời gian này.")
+            st.warning("⚠️ Không tìm thấy dữ liệu trong khoảng thời gian/khu vực này.")
 else:
     st.info("Hãy tải file JSON lên sidebar để bắt đầu.")

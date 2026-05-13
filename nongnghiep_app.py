@@ -61,9 +61,9 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # --- Sidebar ---
+        # --- Sidebar Cấu hình ---
         st.sidebar.markdown("---")
-        view_mode = st.sidebar.selectbox("Chế độ gom nhóm dữ liệu:", 
+        view_mode = st.sidebar.selectbox("Chế độ hiển thị:", 
                                          ["Dữ liệu gốc (Dùng bước nhảy)", 
                                           "Trung bình theo Giờ", 
                                           "Trung bình theo Ngày"])
@@ -80,11 +80,21 @@ if uploaded_files:
         end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
         df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
+        # --- LỌC KHU VỰC (STT) ---
+        if 'STT' in df_filtered.columns:
+            stt_options = sorted(df_filtered['STT'].dropna().unique().tolist())
+            if len(stt_options) > 1:
+                st.sidebar.markdown("---")
+                selected_stt = st.sidebar.selectbox("📍 Chọn Trạm/Khu vực (STT):", ["Tất cả"] + [str(s) for s in stt_options])
+                if selected_stt != "Tất cả":
+                    df_filtered = df_filtered[df_filtered['STT'].astype(str) == selected_stt]
+
         if not df_filtered.empty:
-            # --- Xử lý dữ liệu (Fix lỗi TypeError ở đây) ---
+            st.subheader(f"📊 Biểu đồ ({view_mode})")
+            
+            # --- Xử lý Dữ liệu ---
             if "Trung bình" in view_mode:
                 freq = '1h' if "Giờ" in view_mode else '1D'
-                # QUAN TRỌNG: Thêm numeric_only=True để không lỗi cột chữ
                 df_plot = df_filtered.set_index('Thời gian').resample(freq).mean(numeric_only=True).reset_index()
                 step = 1
             else:
@@ -95,7 +105,6 @@ if uploaded_files:
             num_cols = [c for c in df_plot.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
             valid_cols = [c for c in num_cols if not df_plot[c].dropna().empty]
 
-            st.subheader(f"📊 Biểu đồ xu hướng ({view_mode})")
             selected_metrics = st.multiselect("Chọn thông số muốn vẽ:", valid_cols, default=valid_cols[:min(2, len(valid_cols))])
 
             if selected_metrics:
@@ -113,6 +122,6 @@ if uploaded_files:
             with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
                 st.dataframe(df_plot, use_container_width=True)
         else:
-            st.warning("⚠️ Không có dữ liệu trong khoảng thời gian đã chọn.")
+            st.warning("⚠️ Không tìm thấy dữ liệu cho khu vực hoặc thời gian này.")
 else:
     st.info("Hãy tải file JSON lên sidebar để bắt đầu.")

@@ -61,9 +61,9 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # --- Sidebar: Chế độ xem ---
+        # Chế độ xem biểu đồ
         st.sidebar.markdown("---")
-        view_mode = st.sidebar.selectbox("Chế độ hiển thị biểu đồ:", ["Gốc (Chi tiết)", "Trung bình theo Giờ", "Trung bình theo Ngày"])
+        view_mode = st.sidebar.selectbox("Chế độ hiển thị:", ["Gốc (Dùng bước nhảy)", "Trung bình theo Giờ", "Trung bình theo Ngày"])
 
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         
@@ -85,20 +85,24 @@ if uploaded_files:
         df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
         if not df_filtered.empty:
-            # Gom nhóm dữ liệu nếu chọn chế độ trung bình
-            df_plot = df_filtered.copy().set_index('Thời gian')
+            st.subheader(f"📋 Dữ liệu ({view_mode})")
+            
+            # --- Xử lý dữ liệu theo chế độ xem ---
             if view_mode == "Trung bình theo Giờ":
-                df_plot = df_plot.resample('1h').mean().reset_index()
+                df_plot = df_filtered.set_index('Thời gian').resample('1h').mean().reset_index()
+                step = 1 # Không dùng bước nhảy khi đã lấy trung bình
             elif view_mode == "Trung bình theo Ngày":
-                df_plot = df_plot.resample('1D').mean().reset_index()
+                df_plot = df_filtered.set_index('Thời gian').resample('1D').mean().reset_index()
+                step = 1
             else:
-                df_plot = df_plot.reset_index()
+                # Chế độ Gốc: Hiện thanh Bước nhảy (Độ mảnh)
+                col_step, _ = st.columns([1, 2])
+                step = col_step.select_slider("Bước nhảy (Độ mảnh):", options=[1, 2, 5, 10, 50], value=1)
+                df_plot = df_filtered.iloc[::step]
 
             num_cols = [c for c in df_plot.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
             valid_cols = [c for c in num_cols if not df_plot[c].dropna().empty]
 
-            st.subheader(f"📋 Dữ liệu ({view_mode})")
-            
             selected_metrics = st.multiselect("Bấm để chọn thông số vẽ:", valid_cols, default=valid_cols[:min(2, len(valid_cols))])
 
             if selected_metrics:
@@ -107,7 +111,9 @@ if uploaded_files:
                 
                 for i, m in enumerate(selected_metrics):
                     p_data = df_plot[['Thời gian', m]].dropna()
-                    fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, line=dict(shape='spline')), row=i+1, col=1)
+                    # Dùng spline cho đẹp ở chế độ trung bình, linear cho chế độ gốc
+                    line_shape = 'spline' if "Trung bình" in view_mode else 'linear'
+                    fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, line=dict(shape=line_shape)), row=i+1, col=1)
                 
                 fig.update_layout(height=300 * num_plots, template="plotly_white", hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)

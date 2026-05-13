@@ -61,20 +61,16 @@ if uploaded_files:
     df = all_data[selected_file]
 
     if not df.empty:
-        # Chế độ xem biểu đồ
+        # --- Sidebar ---
         st.sidebar.markdown("---")
-        view_mode = st.sidebar.selectbox("Chế độ hiển thị:", ["Gốc (Dùng bước nhảy)", "Trung bình theo Giờ", "Trung bình theo Ngày"])
+        view_mode = st.sidebar.selectbox("Chế độ gom nhóm dữ liệu:", 
+                                         ["Dữ liệu gốc (Dùng bước nhảy)", 
+                                          "Trung bình theo Giờ", 
+                                          "Trung bình theo Ngày"])
 
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         
         st.sidebar.markdown("---")
-        st.sidebar.header("🗓️ Thống kê")
-        df_temp = df.copy()
-        df_temp['Tháng'] = df_temp['Thời gian'].dt.strftime('%m/%Y')
-        thong_ke = df_temp['Tháng'].value_counts().reset_index()
-        thong_ke.columns = ['Tháng', 'Số lượt đo']
-        st.sidebar.dataframe(thong_ke, hide_index=True)
-
         st.sidebar.header("📅 Lọc thời gian")
         c1, c2 = st.sidebar.columns(2)
         start_date = c1.date_input("Từ ngày", min_dt.date())
@@ -85,25 +81,23 @@ if uploaded_files:
         df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
         if not df_filtered.empty:
-            st.subheader(f"📋 Dữ liệu ({view_mode})")
+            st.subheader(f"📊 Biểu đồ xu hướng ({view_mode})")
             
-            # --- Xử lý dữ liệu theo chế độ xem ---
+            # --- Xử lý dữ liệu ---
             if view_mode == "Trung bình theo Giờ":
                 df_plot = df_filtered.set_index('Thời gian').resample('1h').mean().reset_index()
-                step = 1 # Không dùng bước nhảy khi đã lấy trung bình
             elif view_mode == "Trung bình theo Ngày":
                 df_plot = df_filtered.set_index('Thời gian').resample('1D').mean().reset_index()
-                step = 1
             else:
-                # Chế độ Gốc: Hiện thanh Bước nhảy (Độ mảnh)
+                # Hiện bước nhảy cho dữ liệu gốc để xem khoảng thời gian dài không bị lag
                 col_step, _ = st.columns([1, 2])
-                step = col_step.select_slider("Bước nhảy (Độ mảnh):", options=[1, 2, 5, 10, 50], value=1)
+                step = col_step.select_slider("Bước nhảy (Độ mảnh):", options=[1, 2, 5, 10, 50, 100], value=1)
                 df_plot = df_filtered.iloc[::step]
 
             num_cols = [c for c in df_plot.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
             valid_cols = [c for c in num_cols if not df_plot[c].dropna().empty]
 
-            selected_metrics = st.multiselect("Bấm để chọn thông số vẽ:", valid_cols, default=valid_cols[:min(2, len(valid_cols))])
+            selected_metrics = st.multiselect("Chọn thông số muốn vẽ:", valid_cols, default=valid_cols[:min(2, len(valid_cols))])
 
             if selected_metrics:
                 num_plots = len(selected_metrics)
@@ -111,14 +105,16 @@ if uploaded_files:
                 
                 for i, m in enumerate(selected_metrics):
                     p_data = df_plot[['Thời gian', m]].dropna()
-                    # Dùng spline cho đẹp ở chế độ trung bình, linear cho chế độ gốc
-                    line_shape = 'spline' if "Trung bình" in view_mode else 'linear'
-                    fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, line=dict(shape=line_shape)), row=i+1, col=1)
+                    # Chế độ trung bình dùng spline cho mượt, gốc dùng linear
+                    shape = 'spline' if "Trung bình" in view_mode else 'linear'
+                    fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, line=dict(shape=shape, width=2)), row=i+1, col=1)
                 
-                fig.update_layout(height=300 * num_plots, template="plotly_white", hovermode="x unified")
+                fig.update_layout(height=350 * num_plots, template="plotly_white", hovermode="x unified", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
             
-            with st.expander("🔍 Xem bảng dữ liệu"):
+            with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
                 st.dataframe(df_plot, use_container_width=True)
+        else:
+            st.warning("⚠️ Không có dữ liệu trong khoảng thời gian đã chọn.")
 else:
-    st.info("Hãy tải file JSON lên sidebar.")
+    st.info("Hãy tải file JSON lên sidebar để bắt đầu.")

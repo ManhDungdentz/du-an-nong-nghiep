@@ -81,15 +81,13 @@ if uploaded_files:
         df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
 
         if not df_filtered.empty:
-            st.subheader(f"📊 Biểu đồ xu hướng ({view_mode})")
-            
-            # --- Xử lý dữ liệu ---
-            if view_mode == "Trung bình theo Giờ":
-                df_plot = df_filtered.set_index('Thời gian').resample('1h').mean().reset_index()
-            elif view_mode == "Trung bình theo Ngày":
-                df_plot = df_filtered.set_index('Thời gian').resample('1D').mean().reset_index()
+            # --- Xử lý dữ liệu (Fix lỗi TypeError ở đây) ---
+            if "Trung bình" in view_mode:
+                freq = '1h' if "Giờ" in view_mode else '1D'
+                # QUAN TRỌNG: Thêm numeric_only=True để không lỗi cột chữ
+                df_plot = df_filtered.set_index('Thời gian').resample(freq).mean(numeric_only=True).reset_index()
+                step = 1
             else:
-                # Hiện bước nhảy cho dữ liệu gốc để xem khoảng thời gian dài không bị lag
                 col_step, _ = st.columns([1, 2])
                 step = col_step.select_slider("Bước nhảy (Độ mảnh):", options=[1, 2, 5, 10, 50, 100], value=1)
                 df_plot = df_filtered.iloc[::step]
@@ -97,6 +95,7 @@ if uploaded_files:
             num_cols = [c for c in df_plot.select_dtypes(include=['number']).columns if c not in ['STT', 'index']]
             valid_cols = [c for c in num_cols if not df_plot[c].dropna().empty]
 
+            st.subheader(f"📊 Biểu đồ xu hướng ({view_mode})")
             selected_metrics = st.multiselect("Chọn thông số muốn vẽ:", valid_cols, default=valid_cols[:min(2, len(valid_cols))])
 
             if selected_metrics:
@@ -105,7 +104,6 @@ if uploaded_files:
                 
                 for i, m in enumerate(selected_metrics):
                     p_data = df_plot[['Thời gian', m]].dropna()
-                    # Chế độ trung bình dùng spline cho mượt, gốc dùng linear
                     shape = 'spline' if "Trung bình" in view_mode else 'linear'
                     fig.add_trace(go.Scatter(x=p_data['Thời gian'], y=p_data[m], mode='lines+markers', name=m, line=dict(shape=shape, width=2)), row=i+1, col=1)
                 

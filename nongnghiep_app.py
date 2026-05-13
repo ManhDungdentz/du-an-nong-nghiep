@@ -64,9 +64,10 @@ if uploaded_files:
         # --- Sidebar: Thống kê tháng ---
         st.sidebar.markdown("---")
         st.sidebar.header("🗓️ Thống kê dữ liệu")
-        df_stats = df.copy()
-        df_stats['Tháng'] = df_stats['Thời gian'].dt.strftime('%m/%Y')
-        thong_ke = df_stats['Tháng'].value_counts().reset_index()
+        
+        # Tạo sẵn cột Tháng/Năm để dùng cho cả thống kê và bộ lọc
+        df['Tháng_năm'] = df['Thời gian'].dt.strftime('%m/%Y') 
+        thong_ke = df['Tháng_năm'].value_counts().reset_index()
         thong_ke.columns = ['Tháng', 'Số lượt đo']
         st.sidebar.dataframe(thong_ke, hide_index=True)
 
@@ -79,18 +80,31 @@ if uploaded_files:
 
         min_dt, max_dt = df['Thời gian'].min(), df['Thời gian'].max()
         
+        # --- LỌC THỜI GIAN (CẢI TIẾN MỚI) ---
         st.sidebar.markdown("---")
         st.sidebar.header("📅 Lọc thời gian")
-        c1, c2 = st.sidebar.columns(2)
-        start_date = c1.date_input("Từ ngày", min_dt.date())
-        end_date = c2.date_input("Đến ngày", max_dt.date())
-        
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
-        df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
+        filter_type = st.sidebar.radio("Cách chọn:", ["Theo tháng", "Theo khoảng ngày"], horizontal=True)
+
+        if filter_type == "Theo khoảng ngày":
+            c1, c2 = st.sidebar.columns(2)
+            start_date = c1.date_input("Từ ngày", min_dt.date())
+            end_date = c2.date_input("Đến ngày", max_dt.date())
+            
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
+            df_filtered = df[(df['Thời gian'] >= start_dt) & (df['Thời gian'] <= end_dt)].copy()
+        else:
+            # Lấy danh sách các tháng theo thứ tự thời gian thực tế của dữ liệu
+            available_months = df['Tháng_năm'].drop_duplicates().tolist()
+            
+            selected_months = st.sidebar.multiselect("Bấm chọn các tháng muốn xem:", available_months, default=available_months[-1:])
+            if selected_months:
+                df_filtered = df[df['Tháng_năm'].isin(selected_months)].copy()
+            else:
+                df_filtered = pd.DataFrame()
 
         # --- Lọc Khu vực (STT) ---
-        if 'STT' in df_filtered.columns:
+        if not df_filtered.empty and 'STT' in df_filtered.columns:
             stt_options = sorted(df_filtered['STT'].dropna().unique().tolist())
             if len(stt_options) > 1:
                 st.sidebar.markdown("---")
@@ -129,8 +143,11 @@ if uploaded_files:
                 st.plotly_chart(fig, use_container_width=True)
             
             with st.expander("🔍 Xem bảng dữ liệu chi tiết"):
+                # Ẩn cột Tháng_năm phụ đi cho bảng dữ liệu gọn gàng
+                if 'Tháng_năm' in df_plot.columns:
+                    df_plot = df_plot.drop(columns=['Tháng_năm'])
                 st.dataframe(df_plot, use_container_width=True)
         else:
-            st.warning("⚠️ Không tìm thấy dữ liệu trong khoảng thời gian/khu vực này.")
+            st.warning("⚠️ Vui lòng chọn ít nhất một tháng hoặc khoảng thời gian hợp lệ.")
 else:
     st.info("Hãy tải file JSON lên sidebar để bắt đầu.")
